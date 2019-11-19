@@ -1,5 +1,5 @@
 ﻿# Get relevant statistics data of Veeam Backup for Microsoft Office 365 installations
-# v0.1.0, 19.11.2019
+# v0.1.1, 19.11.2019
 # Stefan Zimmermann <stefan.zimmermann@veeam.com>
 [CmdletBinding()]
 Param(
@@ -119,7 +119,7 @@ process {
     # General VBO architecture data
 
     $result.Add("architecture", @{         
-        vboVersion = (Get-WmiObject -Class Win32_Product | ? { $_.Caption -eq  "Veeam Backup for Microsoft Office 365" }).Version;
+        vboVersion = (Get-WmiObject -Class Win32_Product | ? { $_.Caption -match ".*Veeam Backup for Microsoft Office 365.*" }).Version;
         controllers = @(Get-VBOServerComponents | ? { $_.Name -match ".*Server.*" } | % { [HWInfo]::new($_.ServerName) });
         proxies = @(Get-VBOProxy | % { [HWInfo]::new($_.Hostname)});        
     })
