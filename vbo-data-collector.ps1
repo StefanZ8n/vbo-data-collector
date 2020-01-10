@@ -1,9 +1,22 @@
-﻿# Get relevant statistics data of Veeam Backup for Microsoft Office 365 v4 installations
-# v0.3.0, 09.01.2020
-# Stefan Zimmermann <stefan.zimmermann@veeam.com>
+﻿<# 
+.NAME
+    Veeam Backup for Microsoft Office 365 Data Collector
+.SYNOPSIS
+    Script to use for getting a detailed report per backup job modification
+.DESCRIPTION
+    Get relevant statistics data of Veeam Backup for Microsoft Office 365 v4 installations    
+    
+    Created for Veeam Backup for Microsoft Office 365 v4
+    Released under the MIT license.
+.LINK
+    https://github.com/StefanZi
+.VERSION
+    v0.4.0, 10.01.2020
+#>
 [CmdletBinding()]
 Param(
     [System.IO.FileInfo]$tmpPath = [System.IO.Path]::GetTempPath() + "vbo-data-collector"
+    [bool]$Quick = $true
 )
 DynamicParam {
     Import-Module Veeam.Archiver.PowerShell
@@ -40,7 +53,9 @@ begin {
         [int]$ProtectedLocalSPSites
         [int]$OneDrives
         [int]$ProtectedOneDrives
+        [int]$ProtectedPersonalSites
         [System.Object[]] $Jobs
+        $DataSize
     }
 
     class HWInfo {
@@ -53,6 +68,18 @@ begin {
             $this.hostname = $hostname
             $this.computerSystem = Get-WmiObject -Class Win32_ComputerSystem -ComputerName $hostname | select -Property Manufacturer, Model, NumberOfLogicalProcessors, NumberOfProcessors, TotalPhysicalMemory
             $this.processor = Get-WmiObject -Class Win32_Processor -ComputerName $hostname | select -Property DeviceId, MaxClockSpeed, Name
+        }
+    }
+
+    class ProxyInfo : HWInfo {
+        $repositories
+
+        ProxyInfo(
+            [string]$hostname
+        ) : base($hostname) {            
+            $proxy = Get-VBOProxy -Hostname $hostname
+            $this.repositories = Get-VBORepository -Proxy $proxy | Select-Object Name, RetentionType ,Capacity, FreeSpace, RetentionPeriod, RetentionFrequencyType, EnableObjectStorageEncryption, ObjectStorageRepository.Name
+
         }
     }
 
@@ -119,6 +146,7 @@ process {
         $report = (Compare-Object -ReferenceObject $children -DifferenceObject $childrenChanged).InputObject
         $mailboxes = Import-Csv -Path $report.Fullname
         # TODO: Cleanup Report File or cleanup temp folder at the end!!
+        # TODO: Determine local mailboxes
 
         $thisOrg.Mailboxes = $mailboxes.Length
         $thisOrg.ProtectedMailboxes = ($mailboxes | ? { $_.'Protection Status' -eq "Protected" }).length
@@ -131,7 +159,24 @@ process {
 
         $thisOrg.Jobs = (Get-VBOJob -Organization $org | ? { $_.IsEnabled -eq $true }) | % { [JobInfo]::new($_); }
 
-        #$m = Measure-VBOOrganizationFullBackupSize -Organization $org
+        if ($Quick -eq $false) {
+            $m = Measure-VBOOrganizationFullBackupSize -Organization $org
+            $thisOrg.DataSize = @{
+                Mailboxes = "{0:N2}" -f ($m.MailboxSize/(1024*1024*1024));
+                Archives = "{0:N2}" -f ($m.ArchiveMailboxSize/(1024*1024*1024));
+                Sites = "{0:N2}" -f ($m.SiteSize/(1024*1024*1024));
+                PersonalSites = "{0:N2}" -f ($m.PersonalSiteSize/(1024*1024*1024));
+                OneDrives = "{0:N2}" -f ($m.OneDriveSize/(1024*1024*1024));
+            }
+        }
+
+        $entitydata = Get-VBORepository | % { 
+            $repo = $_;
+            Get-VBOEntityData -Type User -Repository $repo | ? { $_.Email -in $users.UserName }
+        }
+        $thisOrg.ProtectedArchives = ($entitydata | ? { $_.IsArchiveBackedUp -eq $true }).length
+        $thisOrg.ProtectedOneDrives = ($entitydata | ? { $_.IsOneDriveBackedUp -eq $true }).length
+        $thisOrg.ProtectedPersonalSites = ($entitydata | ? { $_.IsPersonalSiteBackedUp -eq $true}).length
 
         $result.orgs.add($org.Name, $thisOrg)
     }
@@ -161,6 +206,9 @@ process {
     $protected = @{ 
         users     = (($result.orgs.Values | % { $_.ProtectedUsers }) | Measure-Object -Sum).Sum;
         mailboxes = (($result.orgs.Values | % { $_.ProtectedMailboxes }) | Measure-Object -Sum).Sum;
+        archives = (($result.orgs.Values | % { $_.ProtectedArchives }) | Measure-Object -Sum).Sum;
+        spsites = (($result.orgs.values | % { $_.ProtectedSPSites }) | Measure-Object -Sum).Sum;
+        onedrives = (($result.orgs.values | % { $_.ProtectedOnedrives }) | Measure-Object -Sum).Sum;
 
     }
     $result.Add("protected", $protected)
@@ -173,7 +221,7 @@ process {
     $result.Add("architecture", @{
             vboVersion  = (Get-WmiObject -Class Win32_Product | ? { $_.Caption -match "Veeam Backup for Microsoft Office 365.*" }).Version;
             controllers = @(Get-VBOServerComponents | ? { $_.Name -match ".*Server.*" } | % { [HWInfo]::new($_.ServerName) });
-            proxies     = @(Get-VBOProxy | % { [HWInfo]::new($_.Hostname) });        
+            proxies     = @(Get-VBOProxy | % { [ProxyInfo]::new($_.Hostname) });        
         })
 
     
