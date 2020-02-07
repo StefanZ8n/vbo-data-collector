@@ -15,7 +15,7 @@
 #>
 [CmdletBinding()]
 Param(
-    [System.IO.FileInfo]$tmpPath = [System.IO.Path]::GetTempPath() + "vbo-data-collector"
+    [System.IO.FileInfo]$tmpPath = [System.IO.Path]::GetTempPath() + "vbo-data-collector",
     [bool]$Quick = $true
 )
 DynamicParam {
