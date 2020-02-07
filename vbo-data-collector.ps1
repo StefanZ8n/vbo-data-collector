@@ -11,7 +11,7 @@
 .LINK
     https://github.com/StefanZi
 .VERSION
-    v0.4.0, 10.01.2020
+    v0.4.1, 07.02.2020
 #>
 [CmdletBinding()]
 Param(
